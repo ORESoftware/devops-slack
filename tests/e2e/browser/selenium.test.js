@@ -8,6 +8,7 @@ import { importBrowserLibrary } from "./optional-import.mjs";
 
 const selenium = await importBrowserLibrary("selenium-webdriver");
 const chrome = await importBrowserLibrary("selenium-webdriver/chrome.js");
+const paginatedContextMarker = "paginated Selenium context marker";
 
 async function saveScreenshot(driver, name) {
   if (!driver) return;
@@ -20,14 +21,29 @@ async function saveScreenshot(driver, name) {
 }
 
 test(
-  "Selenium drives command selection, model override, and public-policy errors",
+  "Selenium drives paginated context, model override, and public-policy errors",
   { skip: !selenium || !chrome, timeout: 60_000 },
   async () => {
     let server;
     let driver;
 
     try {
-      server = await startHarnessServer({ runtimeConfig: { allowPublicResponses: false } });
+      server = await startHarnessServer({
+        runtimeConfig: { allowPublicResponses: false },
+        channelHistoryPages: [
+          {
+            messages: [{ user: "U_BOT", bot_id: "B1", text: "ignored bot message" }],
+            has_more: true,
+            response_metadata: { next_cursor: "selenium-page-2" }
+          },
+          {
+            messages: [{ user: "U_HUMAN", text: paginatedContextMarker }],
+            has_more: false,
+            response_metadata: { next_cursor: "" }
+          }
+        ],
+        channelContextOptions: { messageCount: 1, maxPages: 2 }
+      });
       const options = new chrome.Options()
         .setChromeBinaryPath(browserExecutablePath())
         .addArguments("--headless=new", ...browserLaunchArgs);
@@ -55,7 +71,9 @@ test(
 
       const result = await driver.findElement(selenium.By.id("result"));
       await driver.wait(selenium.until.elementTextContains(result, "E2E anthropic response"), 15_000);
-      assert.match(await result.getText(), /ORES · Claude.*claude-e2e-override/s);
+      const privateResult = await result.getText();
+      assert.match(privateResult, /ORES · Claude.*claude-e2e-override/s);
+      assert.match(privateResult, new RegExp(paginatedContextMarker));
 
       await driver.findElement(selenium.By.id("public")).click();
       await driver.findElement(selenium.By.id("submit")).click();
