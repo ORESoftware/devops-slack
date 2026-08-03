@@ -1,0 +1,120 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  npm_config_audit: "false"
+  npm_config_fund: "false"
+  npm_config_ignore_scripts: "true"
+  npm_config_package_lock: "false"
+
+jobs:
+  quality:
+    name: quality (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22, 24]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          package-manager-cache: false
+      - name: Validate dependency policy
+        run: npm run dependencies:check
+      - name: Install dependencies without lifecycle scripts
+        run: npm install
+      - name: Validate generated manifest
+        run: npm run manifest:check
+      - name: Type-check JavaScript
+        run: npm run check
+      - name: Lint
+        run: npm run lint
+      - name: Run unit tests
+        run: npm run test:unit
+      - name: Run CLI end-to-end tests
+        run: npm run test:e2e:cli
+
+  browser-e2e:
+    name: browser E2E (${{ matrix.framework }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [playwright, puppeteer, selenium]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install Chrome for Testing and ChromeDriver
+        id: chrome
+        uses: browser-actions/setup-chrome@73954683cc80eced513145a42b668b9b91f753c3 # v2.1.2
+        with:
+          chrome-version: stable
+          install-chromedriver: true
+          install-dependencies: true
+      - name: Install dependencies without lifecycle scripts
+        run: npm install
+      - name: Run ${{ matrix.framework }} browser suite
+        run: node --test --test-concurrency=1 tests/e2e/browser/${{ matrix.framework }}.test.js
+        env:
+          E2E_BROWSER_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          E2E_CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
+          REQUIRE_E2E_DEPENDENCIES: "true"
+          SE_AVOID_STATS: "true"
+      - name: Upload browser diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-e2e-${{ matrix.framework }}
+          path: tests/e2e/artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  dependency-audit:
+    name: production dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      npm_config_package_lock: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate dependency policy
+        run: npm run dependencies:check
+      - name: Resolve an ephemeral audit lockfile
+        run: npm install --package-lock-only
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
