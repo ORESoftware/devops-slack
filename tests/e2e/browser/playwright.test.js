@@ -14,6 +14,7 @@ const expectedCommands = [
   "/my-claude",
   "/my-chatgpt"
 ];
+const paginatedContextMarker = "paginated Playwright context marker";
 
 async function screenshotSafely(page, filename) {
   if (!page) return;
@@ -25,7 +26,7 @@ async function screenshotSafely(page, filename) {
 }
 
 test(
-  "Playwright drives private, public, and injection-safe command flows",
+  "Playwright drives private, public, paginated-context, and injection-safe command flows",
   { skip: !playwright, timeout: 60_000 },
   async () => {
     let server;
@@ -35,7 +36,21 @@ test(
     let tracing = false;
 
     try {
-      server = await startHarnessServer();
+      server = await startHarnessServer({
+        channelHistoryPages: [
+          {
+            messages: [{ user: "U_BOT", bot_id: "B1", text: "ignored bot message" }],
+            has_more: true,
+            response_metadata: { next_cursor: "playwright-page-2" }
+          },
+          {
+            messages: [{ user: "U_HUMAN", text: paginatedContextMarker }],
+            has_more: false,
+            response_metadata: { next_cursor: "" }
+          }
+        ],
+        channelContextOptions: { messageCount: 1, maxPages: 2 }
+      });
       const bundled = playwright.chromium.executablePath();
       browser = await playwright.chromium.launch({
         executablePath: browserExecutablePath([bundled]),
@@ -63,10 +78,9 @@ test(
       await page.waitForFunction(() =>
         document.querySelector("#result")?.textContent?.includes("E2E openai response")
       );
-      assert.match(
-        await page.locator("#result").textContent(),
-        /ORES · ChatGPT.*gpt-e2e-override/s
-      );
+      const privateResult = await page.locator("#result").textContent();
+      assert.match(privateResult, /ORES · ChatGPT.*gpt-e2e-override/s);
+      assert.match(privateResult, new RegExp(paginatedContextMarker));
 
       await page.selectOption("#command", "/my-claude");
       await page.fill("#prompt", "summarize my next step");
