@@ -195,6 +195,8 @@ export async function handleSlashCommand({
       try {
         recentMessages = await channelContext.get({
           client,
+          enterpriseId: command.enterprise_id,
+          teamId: command.team_id,
           channelId: command.channel_id
         });
       } catch (error) {
