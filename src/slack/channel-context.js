@@ -1,13 +1,18 @@
 import { redactSensitiveText } from "../security/redaction.js";
 
-const maximumHistoryPageSize = 15;
+const maximumHistoryPageSize = 45;
 const maximumSlackIdentifierLength = 128;
+const maximumCursorLength = 512;
 const allowedSubtypes = new Set([undefined, "thread_broadcast"]);
 
 function assertInteger(name, value, { min, max }) {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
     throw new TypeError(`${name} must be an integer between ${min} and ${max}`);
   }
+}
+
+function codedError(message, code) {
+  return Object.assign(new Error(message), { code });
 }
 
 function optionalSlackIdentifier(name, value) {
@@ -19,7 +24,11 @@ function optionalSlackIdentifier(name, value) {
 }
 
 function contextKey({ enterpriseId, teamId, channelId }) {
-  if (typeof channelId !== "string" || channelId.length === 0 || channelId.length > maximumSlackIdentifierLength) {
+  if (
+    typeof channelId !== "string" ||
+    channelId.length === 0 ||
+    channelId.length > maximumSlackIdentifierLength
+  ) {
     throw new TypeError(
       `channelId must be a non-empty string of at most ${maximumSlackIdentifierLength} characters`
     );
@@ -30,6 +39,42 @@ function contextKey({ enterpriseId, teamId, channelId }) {
     optionalSlackIdentifier("teamId", teamId),
     channelId
   ]);
+}
+
+function continuationCursor(result) {
+  if (result.has_more !== undefined && typeof result.has_more !== "boolean") {
+    throw new TypeError("Slack conversations.history returned a non-boolean has_more value");
+  }
+
+  const metadata = result.response_metadata;
+  if (metadata !== undefined && metadata !== null) {
+    if (typeof metadata !== "object" || Array.isArray(metadata)) {
+      throw new TypeError("Slack conversations.history returned invalid response_metadata");
+    }
+  }
+
+  const rawCursor = metadata?.next_cursor;
+  if (rawCursor === undefined || rawCursor === null || rawCursor === "") {
+    if (result.has_more === true) {
+      throw new TypeError("Slack conversations.history indicated more pages without a cursor");
+    }
+    return null;
+  }
+  if (typeof rawCursor !== "string") {
+    throw new TypeError("Slack conversations.history returned a non-string next_cursor");
+  }
+
+  const cursor = rawCursor.trim();
+  if (
+    cursor.length === 0 ||
+    cursor.length > maximumCursorLength ||
+    !/^[\x21-\x7E]+$/.test(cursor)
+  ) {
+    throw new TypeError(
+      `Slack conversations.history next_cursor must be printable and at most ${maximumCursorLength} characters`
+    );
+  }
+  return cursor;
 }
 
 /**
@@ -76,10 +121,11 @@ function truncate(value, maximum) {
 }
 
 /**
- * Loads recent human-authored channel messages with a bounded TTL/LRU cache and in-flight request
- * coalescing. Cache and in-flight keys include enterprise, workspace, and channel identity so a
- * multi-workspace process cannot reuse one workspace's context in another. The class deliberately
- * omits authors and strips Slack identifiers before returning content to an external provider.
+ * Loads recent human-authored channel messages with bounded pagination, a per-page deadline, a
+ * bounded TTL/LRU cache, and in-flight request coalescing. Cache and in-flight keys include
+ * enterprise, workspace, and channel identity so a multi-workspace process cannot reuse one
+ * workspace's context in another. The class deliberately omits authors and strips Slack identifiers
+ * before returning content to an external provider.
  */
 export class SlackChannelContext {
   constructor({
@@ -87,19 +133,31 @@ export class SlackChannelContext {
     cacheTtlMs = 60_000,
     maxChars = 6_000,
     maxEntries = 500,
-    now = Date.now
+    maxPages = 3,
+    fetchTimeoutMs = 10_000,
+    now = Date.now,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout
   } = {}) {
     assertInteger("messageCount", messageCount, { min: 0, max: 15 });
     assertInteger("cacheTtlMs", cacheTtlMs, { min: 1_000, max: 3_600_000 });
     assertInteger("maxChars", maxChars, { min: 256, max: 50_000 });
     assertInteger("maxEntries", maxEntries, { min: 1, max: 10_000 });
+    assertInteger("maxPages", maxPages, { min: 1, max: 10 });
+    assertInteger("fetchTimeoutMs", fetchTimeoutMs, { min: 1, max: 60_000 });
     if (typeof now !== "function") throw new TypeError("now must be a function");
+    if (typeof setTimer !== "function") throw new TypeError("setTimer must be a function");
+    if (typeof clearTimer !== "function") throw new TypeError("clearTimer must be a function");
 
     this.messageCount = messageCount;
     this.cacheTtlMs = cacheTtlMs;
     this.maxChars = maxChars;
     this.maxEntries = maxEntries;
+    this.maxPages = maxPages;
+    this.fetchTimeoutMs = fetchTimeoutMs;
     this.now = now;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
     this.cache = new Map();
     this.inFlight = new Map();
   }
@@ -136,36 +194,90 @@ export class SlackChannelContext {
     }
   }
 
+  async #fetchHistoryPage(client, payload) {
+    let timerHandle;
+    const historyRequest = Promise.resolve().then(() => client.conversations.history(payload));
+    const timeout = new Promise((_, reject) => {
+      timerHandle = this.setTimer(() => {
+        reject(
+          codedError(
+            `Slack conversations.history timed out after ${this.fetchTimeoutMs}ms`,
+            "SLACK_HISTORY_TIMEOUT"
+          )
+        );
+      }, this.fetchTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([historyRequest, timeout]);
+    } finally {
+      this.clearTimer(timerHandle);
+    }
+  }
+
   async #fetch(client, channelId, key) {
     if (typeof client?.conversations?.history !== "function") {
       throw new TypeError("Slack client does not expose conversations.history");
     }
 
-    const result = await client.conversations.history({
-      channel: channelId,
-      limit: Math.min(maximumHistoryPageSize, Math.max(this.messageCount, this.messageCount * 3))
-    });
-    if (!result || typeof result !== "object") {
-      throw new TypeError("Slack conversations.history returned an invalid response");
-    }
-    if (result.ok === false) {
-      const slackError =
-        typeof result.error === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(result.error)
-          ? result.error
-          : "unknown_error";
-      throw Object.assign(new Error(`Slack conversations.history failed: ${slackError}`), {
-        code: "SLACK_HISTORY_FAILED"
-      });
-    }
-    if (!Array.isArray(result.messages)) {
-      throw new TypeError("Slack conversations.history did not return a messages array");
+    const selectedNewestFirst = [];
+    const seenMessageIds = new Set();
+    const seenCursors = new Set();
+    const limit = Math.min(
+      maximumHistoryPageSize,
+      Math.max(this.messageCount, this.messageCount * 3)
+    );
+    let cursor = null;
+
+    for (let page = 0; page < this.maxPages; page += 1) {
+      const payload = { channel: channelId, limit };
+      if (cursor) payload.cursor = cursor;
+
+      const result = await this.#fetchHistoryPage(client, payload);
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new TypeError("Slack conversations.history returned an invalid response");
+      }
+      if (result.ok === false) {
+        const slackError =
+          typeof result.error === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(result.error)
+            ? result.error
+            : "unknown_error";
+        throw codedError(
+          `Slack conversations.history failed: ${slackError}`,
+          "SLACK_HISTORY_FAILED"
+        );
+      }
+      if (!Array.isArray(result.messages)) {
+        throw new TypeError("Slack conversations.history did not return a messages array");
+      }
+
+      for (const message of result.messages) {
+        if (!isEligibleMessage(message)) continue;
+        const messageId = typeof message.ts === "string" ? message.ts.trim() : "";
+        if (messageId && seenMessageIds.has(messageId)) continue;
+
+        const text = sanitizeSlackContextText(message.text);
+        if (!text) continue;
+        if (messageId) seenMessageIds.add(messageId);
+        selectedNewestFirst.push(text);
+        if (selectedNewestFirst.length >= this.messageCount) break;
+      }
+
+      if (selectedNewestFirst.length >= this.messageCount) break;
+      const nextCursor = continuationCursor(result);
+      if (!nextCursor) break;
+      if (seenCursors.has(nextCursor)) {
+        throw codedError(
+          "Slack conversations.history returned a repeated pagination cursor",
+          "SLACK_HISTORY_CURSOR_LOOP"
+        );
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
     }
 
     const perMessageLimit = Math.max(1, Math.floor(this.maxChars / this.messageCount));
-    const selected = result.messages
-      .filter(isEligibleMessage)
-      .map((message) => sanitizeSlackContextText(message.text))
-      .filter(Boolean)
+    const selected = selectedNewestFirst
       .slice(0, this.messageCount)
       .reverse()
       .map((text) => truncate(text, perMessageLimit));
