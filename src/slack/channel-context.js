@@ -196,7 +196,12 @@ export class SlackChannelContext {
 
   async #fetchHistoryPage(client, payload) {
     let timerHandle;
-    const historyRequest = Promise.resolve().then(() => client.conversations.history(payload));
+    let historyRequest;
+    try {
+      historyRequest = Promise.resolve(client.conversations.history(payload));
+    } catch (error) {
+      historyRequest = Promise.reject(error);
+    }
     const timeout = new Promise((_, reject) => {
       timerHandle = this.setTimer(() => {
         reject(
