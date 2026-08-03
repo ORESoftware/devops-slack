@@ -34,6 +34,10 @@ prompt-injection risk. Retrieval follows at most `SLACK_CONTEXT_MAX_PAGES` curso
 `SLACK_CONTEXT_FETCH_TIMEOUT_MS` to each page. Set `SLACK_CONTEXT_MESSAGE_COUNT=0` to disable this
 behavior. See [bounded Slack context retrieval](docs/slack-context-retrieval.md) for the full contract.
 
+The current command text is also scanned before provider processing. Recognizable provider, Slack,
+GitHub, bearer, and configured environment credentials are replaced with redaction markers, and the
+Slack response states when this occurred. See [credential-like command text](docs/prompt-secret-redaction.md).
+
 ## Local setup
 
 The app uses Slack Socket Mode, so local development does not require a public request URL.
@@ -119,6 +123,7 @@ Then configure each slash command request URL in Slack. Socket Mode remains the 
 - Context retrieval follows at most `SLACK_CONTEXT_MAX_PAGES` cursors, applies `SLACK_CONTEXT_FETCH_TIMEOUT_MS` to each page, rejects cursor loops and malformed pagination, and never caches a successful prefix when a later page fails.
 - Concurrent context lookups for the same enterprise/workspace/channel are coalesced, and the context cache is LRU-bounded by `SLACK_CONTEXT_CACHE_MAX_ENTRIES`.
 - Missing history scopes, inaccessible conversations, history deadlines, and Slack history API failures degrade to a context-free provider request instead of failing the slash command.
+- Credential-like values in the current command are redacted before provider processing; completion telemetry records only a boolean and the Slack response discloses that redaction occurred.
 - API errors are sanitized before being shown to users, and structured logs redact known token formats and configured secrets.
 - Generated Slack user, group, channel, and broadcast mention markup is neutralized before posting.
 - Link and media unfurls are disabled on model-generated public channel messages so Slack does not crawl arbitrary generated URLs.
@@ -138,7 +143,7 @@ Browser E2E tests live in `tests/e2e/browser/` and drive a local command console
 - Puppeteer
 - Selenium WebDriver
 
-The browser suites cover private and public command paths, multi-page Slack context, model overrides, help output, provider failures, output injection safety, strict browser security headers, and public-response policy enforcement. Each driver runs as an independent GitHub Actions job. Screenshots and Playwright traces are written to `tests/e2e/artifacts/`.
+The browser suites cover private and public command paths, multi-page Slack context, model overrides, help output, provider failures, credential redaction, output injection safety, strict browser security headers, and public-response policy enforcement. Each driver runs as an independent GitHub Actions job. Screenshots and Playwright traces are written to `tests/e2e/artifacts/`.
 
 Run the suites with:
 
