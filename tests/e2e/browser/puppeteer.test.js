@@ -7,6 +7,7 @@ import { importBrowserLibrary } from "./optional-import.mjs";
 
 const puppeteerModule = await importBrowserLibrary("puppeteer-core");
 const puppeteer = puppeteerModule?.default;
+const paginatedContextMarker = "paginated Puppeteer context marker";
 
 async function screenshotSafely(page, filename) {
   if (!page) return;
@@ -18,7 +19,7 @@ async function screenshotSafely(page, filename) {
 }
 
 test(
-  "Puppeteer invokes a command, renders help, and reports provider failures safely",
+  "Puppeteer invokes a command with paginated context, renders help, and reports failures safely",
   { skip: !puppeteer, timeout: 60_000 },
   async () => {
     let server;
@@ -26,7 +27,21 @@ test(
     let page;
 
     try {
-      server = await startHarnessServer();
+      server = await startHarnessServer({
+        channelHistoryPages: [
+          {
+            messages: [{ user: "U_BOT", bot_id: "B1", text: "ignored bot message" }],
+            has_more: true,
+            response_metadata: { next_cursor: "puppeteer-page-2" }
+          },
+          {
+            messages: [{ user: "U_HUMAN", text: paginatedContextMarker }],
+            has_more: false,
+            response_metadata: { next_cursor: "" }
+          }
+        ],
+        channelContextOptions: { messageCount: 1, maxPages: 2 }
+      });
       browser = await puppeteer.launch({
         executablePath: browserExecutablePath(),
         args: browserLaunchArgs,
@@ -49,6 +64,7 @@ test(
       const answer = await page.$eval("#result", (element) => element.textContent || "");
       assert.match(answer, /X · Claude/);
       assert.match(answer, /write a concise launch note/);
+      assert.match(answer, new RegExp(paginatedContextMarker));
 
       await page.$eval("#prompt", (element) => {
         element.value = "";
