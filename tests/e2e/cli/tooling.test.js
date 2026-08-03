@@ -42,6 +42,9 @@ test("GitHub Actions use immutable action SHAs and isolated browser jobs", async
   assert.match(workflow, /permissions:\n\s+contents: read/);
   assert.match(workflow, /framework: \[playwright, puppeteer, selenium\]/);
   assert.match(workflow, /browser-e2e-\$\{\{ matrix\.framework \}\}/);
+  assert.doesNotMatch(workflow, /browser-actions\/setup-chrome/);
+  assert.match(workflow, /command -v google-chrome/);
+  assert.match(workflow, /CHROMEWEBDRIVER/);
   assert.match(workflow, /npm_config_package_lock: "true"/);
   assert.match(workflow, /npm install --package-lock-only/);
 });
