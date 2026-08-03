@@ -30,7 +30,9 @@ By default, the app also supplies up to five recent human-authored messages from
 conversation as background context. Authors, Slack IDs, bot messages, system events, and recognizable
 credential formats are removed before this context is sent to a provider. The current slash-command
 request is kept separate, and the history is explicitly marked as untrusted quoted data to reduce
-prompt-injection risk. Set `SLACK_CONTEXT_MESSAGE_COUNT=0` to disable this behavior.
+prompt-injection risk. Retrieval follows at most `SLACK_CONTEXT_MAX_PAGES` cursors and applies
+`SLACK_CONTEXT_FETCH_TIMEOUT_MS` to each page. Set `SLACK_CONTEXT_MESSAGE_COUNT=0` to disable this
+behavior. See [bounded Slack context retrieval](docs/slack-context-retrieval.md) for the full contract.
 
 ## Local setup
 
@@ -113,9 +115,10 @@ Then configure each slash command request URL in Slack. Socket Mode remains the 
 - Optional per-provider model allowlists prevent arbitrary model overrides.
 - Public channel responses can be disabled with `ALLOW_PUBLIC_RESPONSES=false`.
 - Slack team, channel, and user IDs are excluded from provider prompts by default; opt in only with `INCLUDE_SLACK_IDENTIFIERS_IN_PROMPT=true`.
-- Up to `SLACK_CONTEXT_MESSAGE_COUNT` recent human-authored messages are cached per channel for `SLACK_CONTEXT_CACHE_TTL_MS`, redacted, stripped of author identifiers, bounded by `SLACK_CONTEXT_MAX_CHARS`, and supplied as untrusted context. Set the count to `0` to disable external sharing of channel history.
-- Concurrent context lookups for the same channel are coalesced, and the context cache is LRU-bounded by `SLACK_CONTEXT_CACHE_MAX_ENTRIES`.
-- Missing history scopes, inaccessible conversations, and Slack history API failures degrade to a context-free provider request instead of failing the slash command.
+- Up to `SLACK_CONTEXT_MESSAGE_COUNT` recent human-authored messages are cached per enterprise/workspace/channel for `SLACK_CONTEXT_CACHE_TTL_MS`, redacted, stripped of author identifiers, bounded by `SLACK_CONTEXT_MAX_CHARS`, and supplied as untrusted context. Set the count to `0` to disable external sharing of channel history.
+- Context retrieval follows at most `SLACK_CONTEXT_MAX_PAGES` cursors, applies `SLACK_CONTEXT_FETCH_TIMEOUT_MS` to each page, rejects cursor loops and malformed pagination, and never caches a successful prefix when a later page fails.
+- Concurrent context lookups for the same enterprise/workspace/channel are coalesced, and the context cache is LRU-bounded by `SLACK_CONTEXT_CACHE_MAX_ENTRIES`.
+- Missing history scopes, inaccessible conversations, history deadlines, and Slack history API failures degrade to a context-free provider request instead of failing the slash command.
 - API errors are sanitized before being shown to users, and structured logs redact known token formats and configured secrets.
 - Generated Slack user, group, channel, and broadcast mention markup is neutralized before posting.
 - Link and media unfurls are disabled on model-generated public channel messages so Slack does not crawl arbitrary generated URLs.
@@ -127,7 +130,7 @@ Then configure each slash command request URL in Slack. Socket Mode remains the 
 
 Unit tests live in `test/`.
 
-CLI E2E tests live in `tests/e2e/cli/`. They execute all six commands as subprocesses through the real parser, access checks, router, semaphore, response chunking, and Slack response handler with deterministic provider and Slack API doubles.
+CLI E2E tests live in `tests/e2e/cli/`. They execute all six commands as subprocesses through the real parser, access checks, router, semaphore, response chunking, Slack context retrieval, and Slack response handler with deterministic provider and Slack API doubles.
 
 Browser E2E tests live in `tests/e2e/browser/` and drive a local command console through:
 
@@ -135,7 +138,7 @@ Browser E2E tests live in `tests/e2e/browser/` and drive a local command console
 - Puppeteer
 - Selenium WebDriver
 
-The browser suites cover private and public command paths, model overrides, help output, provider failures, output injection safety, strict browser security headers, and public-response policy enforcement. Each driver runs as an independent GitHub Actions matrix job. Screenshots and Playwright traces are written to `tests/e2e/artifacts/`.
+The browser suites cover private and public command paths, multi-page Slack context, model overrides, help output, provider failures, output injection safety, strict browser security headers, and public-response policy enforcement. Each driver runs as an independent GitHub Actions job. Screenshots and Playwright traces are written to `tests/e2e/artifacts/`.
 
 Run the suites with:
 
@@ -152,8 +155,8 @@ The local E2E harness does not call live AI providers or modify the Slack worksp
 
 CI runs:
 
-- unit, CLI E2E, manifest, type, and lint checks on Node.js 22 and 24;
-- independent Playwright, Puppeteer, and Selenium jobs against the same Chrome for Testing channel;
+- unit, CLI E2E, manifest, syntax, and lint checks on Node.js 22 and 24;
+- independent Playwright, Puppeteer, and Selenium jobs against the Chrome and ChromeDriver preinstalled on GitHub-hosted runners;
 - a high-severity production dependency audit;
 - browser screenshots and traces as workflow artifacts.
 
