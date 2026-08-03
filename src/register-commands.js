@@ -1,5 +1,5 @@
 import { parseCommandText } from "./command-options.js";
-import { errorDetailsForLog } from "./security/redaction.js";
+import { errorDetailsForLog, redactSensitiveText } from "./security/redaction.js";
 import { isAllowed } from "./security/access.js";
 import { chunkText, truncateText } from "./slack/chunk-text.js";
 import { RequestDeduplicator } from "./request-deduplicator.js";
@@ -166,6 +166,9 @@ export async function handleSlashCommand({
     return;
   }
 
+  const providerPrompt = redactSensitiveText(options.prompt) || "";
+  const promptRedacted = providerPrompt !== options.prompt;
+
   if (options.responseType === "in_channel" && runtimeConfig.allowPublicResponses === false) {
     await respond({
       response_type: "ephemeral",
@@ -211,7 +214,7 @@ export async function handleSlashCommand({
 
       const result = await router.run({
         definition,
-        prompt: options.prompt,
+        prompt: providerPrompt,
         model: options.model,
         recentMessages,
         context: {
@@ -232,7 +235,12 @@ export async function handleSlashCommand({
     const profileLabel = profiles[definition.profile]?.label || definition.profile;
     const providerLabel = providerLabels[definition.provider] || definition.provider;
     const heading = `*${profileLabel} · ${providerLabel}*  _${result.model}_`;
-    const slackSafeOutput = neutralizeSlackMentions(`${heading}\n\n${result.text}`);
+    const redactionNotice = promptRedacted
+      ? "\n\n_Credential-like text was redacted before provider processing._"
+      : "";
+    const slackSafeOutput = neutralizeSlackMentions(
+      `${heading}${redactionNotice}\n\n${result.text}`
+    );
     const limited = truncateText(slackSafeOutput, runtimeConfig.maxResponseChars);
     const chunks = chunkText(limited.text);
 
@@ -251,6 +259,7 @@ export async function handleSlashCommand({
       userId: command.user_id,
       channelId: command.channel_id,
       contextMessages,
+      promptRedacted,
       responseChars: result.text.length,
       truncated: limited.truncated
     });
