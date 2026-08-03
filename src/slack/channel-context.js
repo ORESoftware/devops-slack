@@ -1,12 +1,35 @@
 import { redactSensitiveText } from "../security/redaction.js";
 
 const maximumHistoryPageSize = 15;
+const maximumSlackIdentifierLength = 128;
 const allowedSubtypes = new Set([undefined, "thread_broadcast"]);
 
 function assertInteger(name, value, { min, max }) {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
     throw new TypeError(`${name} must be an integer between ${min} and ${max}`);
   }
+}
+
+function optionalSlackIdentifier(name, value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.length > maximumSlackIdentifierLength) {
+    throw new TypeError(`${name} must be a string of at most ${maximumSlackIdentifierLength} characters`);
+  }
+  return value;
+}
+
+function contextKey({ enterpriseId, teamId, channelId }) {
+  if (typeof channelId !== "string" || channelId.length === 0 || channelId.length > maximumSlackIdentifierLength) {
+    throw new TypeError(
+      `channelId must be a non-empty string of at most ${maximumSlackIdentifierLength} characters`
+    );
+  }
+
+  return JSON.stringify([
+    optionalSlackIdentifier("enterpriseId", enterpriseId),
+    optionalSlackIdentifier("teamId", teamId),
+    channelId
+  ]);
 }
 
 /**
@@ -54,8 +77,9 @@ function truncate(value, maximum) {
 
 /**
  * Loads recent human-authored channel messages with a bounded TTL/LRU cache and in-flight request
- * coalescing. The class deliberately omits authors and strips Slack identifiers before returning
- * any content that may be sent to an external model provider.
+ * coalescing. Cache and in-flight keys include enterprise, workspace, and channel identity so a
+ * multi-workspace process cannot reuse one workspace's context in another. The class deliberately
+ * omits authors and strips Slack identifiers before returning content to an external provider.
  */
 export class SlackChannelContext {
   constructor({
@@ -85,32 +109,34 @@ export class SlackChannelContext {
   }
 
   /**
-   * @param {{ client: any, channelId?: string }} options
+   * @param {{ client: any, enterpriseId?: string, teamId?: string, channelId?: string }} options
    * @returns {Promise<string[]>}
    */
-  async get({ client, channelId }) {
+  async get({ client, enterpriseId, teamId, channelId }) {
     if (!this.enabled || !channelId) return [];
 
-    const cached = this.cache.get(channelId);
+    const key = contextKey({ enterpriseId, teamId, channelId });
+    const cached = this.cache.get(key);
     if (cached && cached.expiresAt > this.now()) {
-      this.cache.delete(channelId);
-      this.cache.set(channelId, cached);
+      this.cache.delete(key);
+      this.cache.set(key, cached);
       return [...cached.messages];
     }
+    if (cached) this.cache.delete(key);
 
-    const active = this.inFlight.get(channelId);
+    const active = this.inFlight.get(key);
     if (active) return [...(await active)];
 
-    const request = this.#fetch(client, channelId);
-    this.inFlight.set(channelId, request);
+    const request = this.#fetch(client, channelId, key);
+    this.inFlight.set(key, request);
     try {
       return [...(await request)];
     } finally {
-      if (this.inFlight.get(channelId) === request) this.inFlight.delete(channelId);
+      if (this.inFlight.get(key) === request) this.inFlight.delete(key);
     }
   }
 
-  async #fetch(client, channelId) {
+  async #fetch(client, channelId, key) {
     if (typeof client?.conversations?.history !== "function") {
       throw new TypeError("Slack client does not expose conversations.history");
     }
@@ -119,9 +145,24 @@ export class SlackChannelContext {
       channel: channelId,
       limit: Math.min(maximumHistoryPageSize, Math.max(this.messageCount, this.messageCount * 3))
     });
-    const messages = Array.isArray(result?.messages) ? result.messages : [];
+    if (!result || typeof result !== "object") {
+      throw new TypeError("Slack conversations.history returned an invalid response");
+    }
+    if (result.ok === false) {
+      const slackError =
+        typeof result.error === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(result.error)
+          ? result.error
+          : "unknown_error";
+      throw Object.assign(new Error(`Slack conversations.history failed: ${slackError}`), {
+        code: "SLACK_HISTORY_FAILED"
+      });
+    }
+    if (!Array.isArray(result.messages)) {
+      throw new TypeError("Slack conversations.history did not return a messages array");
+    }
+
     const perMessageLimit = Math.max(1, Math.floor(this.maxChars / this.messageCount));
-    const selected = messages
+    const selected = result.messages
       .filter(isEligibleMessage)
       .map((message) => sanitizeSlackContextText(message.text))
       .filter(Boolean)
@@ -129,7 +170,7 @@ export class SlackChannelContext {
       .reverse()
       .map((text) => truncate(text, perMessageLimit));
 
-    this.cache.set(channelId, {
+    this.cache.set(key, {
       expiresAt: this.now() + this.cacheTtlMs,
       messages: Object.freeze([...selected])
     });
