@@ -17,7 +17,9 @@ const baseRuntimeConfig = Object.freeze({
 function createProvider(name, defaultModel) {
   return {
     async generate({ prompt, model, systemPrompt }) {
-      if (prompt.includes("[e2e:error]")) throw new Error("synthetic provider failure with secret sk-test-never-expose");
+      if (prompt.includes("[e2e:error]")) {
+        throw new Error("synthetic provider failure with secret sk-test-never-expose");
+      }
       const delayMatch = prompt.match(/\[e2e:delay=(\d+)\]/);
       if (delayMatch) await new Promise((resolve) => setTimeout(resolve, Number(delayMatch[1])));
       const profileLine = systemPrompt.split("\n", 1)[0].trim();
@@ -49,6 +51,9 @@ export function createCommandHarness(options = {}) {
     runtimeConfig,
     providers: providerOverrides,
     channelMessages = [],
+    channelHistoryPages = undefined,
+    historyHandler = undefined,
+    channelContextOptions = {},
     concurrency = 2,
     perUserConcurrency = 1,
     perUserQueue = 2
@@ -62,13 +67,19 @@ export function createCommandHarness(options = {}) {
   const semaphore = new Semaphore(concurrency);
   const userSemaphore = new KeyedSemaphore(perUserConcurrency, { maxQueue: perUserQueue });
   const resolvedRuntimeConfig = mergeRuntimeConfig(runtimeConfig);
+  const defaultMessageCount = channelHistoryPages
+    ? 5
+    : Math.min(15, channelMessages.length);
   const channelContext = new SlackChannelContext({
-    messageCount: Math.min(15, channelMessages.length)
+    messageCount: channelContextOptions.messageCount ?? defaultMessageCount,
+    ...channelContextOptions
   });
+  const historyCalls = [];
 
   return {
     commands: commandDefinitions.map((definition) => definition.command),
     semaphore,
+    historyCalls,
     async invoke({ commandName, text = "", userId = "U_E2E", channelId = "C_E2E" }) {
       const definition = commandDefinitions.find((entry) => entry.command === commandName);
       if (!definition) throw new Error(`Unknown command: ${commandName}`);
@@ -92,11 +103,26 @@ export function createCommandHarness(options = {}) {
         },
         client: {
           conversations: {
-            history: async () => ({
-              messages: [...channelMessages]
-                .reverse()
-                .map((text, index) => ({ user: `U_CONTEXT_${index}`, text }))
-            })
+            history: async (payload) => {
+              historyCalls.push(structuredClone(payload));
+              if (historyHandler) {
+                return historyHandler(payload, historyCalls.length - 1);
+              }
+              if (channelHistoryPages) {
+                return structuredClone(
+                  channelHistoryPages[historyCalls.length - 1] ?? { messages: [] }
+                );
+              }
+              return {
+                messages: [...channelMessages]
+                  .reverse()
+                  .map((message, index) =>
+                    typeof message === "string"
+                      ? { user: `U_CONTEXT_${index}`, text: message }
+                      : structuredClone(message)
+                  )
+              };
+            }
           },
           chat: {
             postMessage: async (payload) => {
@@ -142,6 +168,7 @@ export function createCommandHarness(options = {}) {
         publicPosts,
         ephemeralPosts,
         logs,
+        historyCalls: structuredClone(historyCalls),
         finalResponse: responses.at(-1)?.text || "",
         publicTranscript: publicPosts.map((entry) => entry.text).join("\n\n")
       };
