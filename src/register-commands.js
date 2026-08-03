@@ -190,42 +190,44 @@ export async function handleSlashCommand({
   });
 
   try {
-    let recentMessages = [];
-    if (channelContext?.enabled) {
-      try {
-        recentMessages = await channelContext.get({
-          client,
-          enterpriseId: command.enterprise_id,
-          teamId: command.team_id,
-          channelId: command.channel_id
-        });
-      } catch (error) {
-        logger.warn?.("slack_context_unavailable", {
-          command: definition.command,
-          channelId: command.channel_id,
-          error: errorDetailsForLog(error)
-        });
-      }
-    }
-
-    const runProvider = () =>
-      semaphore.use(() =>
-        router.run({
-          definition,
-          prompt: options.prompt,
-          model: options.model,
-          recentMessages,
-          context: {
+    const executeAdmittedCommand = async () => {
+      let recentMessages = [];
+      if (channelContext?.enabled) {
+        try {
+          recentMessages = await channelContext.get({
+            client,
+            enterpriseId: command.enterprise_id,
             teamId: command.team_id,
+            channelId: command.channel_id
+          });
+        } catch (error) {
+          logger.warn?.("slack_context_unavailable", {
+            command: definition.command,
             channelId: command.channel_id,
-            userId: command.user_id
-          }
-        })
-      );
+            error: errorDetailsForLog(error)
+          });
+        }
+      }
+
+      const result = await router.run({
+        definition,
+        prompt: options.prompt,
+        model: options.model,
+        recentMessages,
+        context: {
+          teamId: command.team_id,
+          channelId: command.channel_id,
+          userId: command.user_id
+        }
+      });
+      return { result, contextMessages: recentMessages.length };
+    };
+
+    const runWithinGlobalLimit = () => semaphore.use(executeAdmittedCommand);
     const userKey = `${command.team_id || "unknown"}:${command.user_id || "unknown"}`;
-    const result = userSemaphore
-      ? await userSemaphore.use(userKey, runProvider)
-      : await runProvider();
+    const { result, contextMessages } = userSemaphore
+      ? await userSemaphore.use(userKey, runWithinGlobalLimit)
+      : await runWithinGlobalLimit();
 
     const profileLabel = profiles[definition.profile]?.label || definition.profile;
     const providerLabel = providerLabels[definition.provider] || definition.provider;
@@ -248,7 +250,7 @@ export async function handleSlashCommand({
       model: result.model,
       userId: command.user_id,
       channelId: command.channel_id,
-      contextMessages: recentMessages.length,
+      contextMessages,
       responseChars: result.text.length,
       truncated: limited.truncated
     });
