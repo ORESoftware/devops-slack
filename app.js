@@ -61,7 +61,9 @@ const channelContext = new SlackChannelContext({
   messageCount: runtimeConfig.slackContextMessageCount,
   cacheTtlMs: runtimeConfig.slackContextCacheTtlMs,
   maxChars: runtimeConfig.slackContextMaxChars,
-  maxEntries: runtimeConfig.slackContextCacheMaxEntries
+  maxEntries: runtimeConfig.slackContextCacheMaxEntries,
+  maxPages: runtimeConfig.slackContextMaxPages,
+  fetchTimeoutMs: runtimeConfig.slackContextFetchTimeoutMs
 });
 
 const commandRuntime = registerCommands({
