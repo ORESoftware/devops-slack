@@ -103,6 +103,16 @@ test(
       );
       assert.equal(await page.evaluate(() => Reflect.get(window, "__e2eXss")), undefined);
       assert.equal(await page.locator("#result img").count(), 0);
+
+      const syntheticToken = "ghp_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+      await page.fill("#prompt", `audit ${syntheticToken} safely`);
+      await page.click("#submit");
+      await page.waitForFunction(() =>
+        document.querySelector("#result")?.textContent?.includes("Credential-like text was redacted")
+      );
+      const redactedResult = await page.locator("#result").textContent();
+      assert.doesNotMatch(redactedResult, new RegExp(syntheticToken));
+      assert.match(redactedResult, /\[REDACTED_TOKEN\]/);
       await screenshotSafely(page, "playwright-success.png");
     } catch (error) {
       await screenshotSafely(page, "playwright-failure.png");
