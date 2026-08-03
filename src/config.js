@@ -118,6 +118,16 @@ export function loadRuntimeConfig(env = process.env) {
       max: 10_000,
       env
     }),
+    slackContextMaxPages: integerEnv("SLACK_CONTEXT_MAX_PAGES", 3, {
+      min: 1,
+      max: 10,
+      env
+    }),
+    slackContextFetchTimeoutMs: integerEnv("SLACK_CONTEXT_FETCH_TIMEOUT_MS", 10_000, {
+      min: 100,
+      max: 60_000,
+      env
+    }),
     timeoutMs: integerEnv("AGENT_TIMEOUT_MS", 120_000, { min: 1_000, max: 600_000, env }),
     maxOutputTokens: integerEnv("MAX_OUTPUT_TOKENS", 3_000, { min: 64, max: 32_000, env }),
     maxPromptChars: integerEnv("MAX_PROMPT_CHARS", 12_000, { min: 1, max: 100_000, env }),
