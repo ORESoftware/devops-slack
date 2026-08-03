@@ -1,4 +1,5 @@
 import { parseCommandText } from "./command-options.js";
+import { errorDetailsForLog } from "./security/redaction.js";
 import { isAllowed } from "./security/access.js";
 import { chunkText, truncateText } from "./slack/chunk-text.js";
 import { RequestDeduplicator } from "./request-deduplicator.js";
@@ -28,19 +29,6 @@ function isTimeoutError(error) {
   );
 }
 
-function redactSensitiveText(value) {
-  if (!value) return value;
-  let redacted = String(value)
-    .replace(/\b(?:sk|xox[a-z]|xapp)-[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED_TOKEN]")
-    .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [REDACTED_TOKEN]");
-
-  for (const [name, secret] of Object.entries(process.env)) {
-    if (!/(?:KEY|TOKEN|SECRET|PASSWORD)$/i.test(name) || !secret || secret.length < 8) continue;
-    redacted = redacted.split(secret).join(`[REDACTED_${name}]`);
-  }
-  return redacted;
-}
-
 function neutralizeSlackMentions(value) {
   return String(value)
     .replace(
@@ -53,23 +41,6 @@ function neutralizeSlackMentions(value) {
     )
     .replace(/<@[A-Z0-9]+>/gi, "@\u200Buser")
     .replace(/<#[A-Z0-9]+(?:\|[^>]*)?>/gi, "#\u200Bchannel");
-}
-
-function logScalar(value) {
-  if (value === undefined || value === null) return value;
-  return redactSensitiveText(String(value).slice(0, 500));
-}
-
-function errorDetailsForLog(error) {
-  if (!(error instanceof Error)) return { message: logScalar(error) };
-  const details = /** @type {Error & { code?: unknown, status?: unknown }} */ (error);
-  return {
-    name: logScalar(details.name),
-    message: logScalar(details.message),
-    code: logScalar(details.code),
-    status: logScalar(details.status),
-    stack: redactSensitiveText(details.stack)?.slice(0, 4_000)
-  };
 }
 
 export function safeErrorMessage(error) {
@@ -152,6 +123,7 @@ export async function handleSlashCommand({
   router,
   semaphore,
   userSemaphore = undefined,
+  channelContext = undefined,
   runtimeConfig,
   profiles
 }) {
@@ -218,12 +190,29 @@ export async function handleSlashCommand({
   });
 
   try {
+    let recentMessages = [];
+    if (channelContext?.enabled) {
+      try {
+        recentMessages = await channelContext.get({
+          client,
+          channelId: command.channel_id
+        });
+      } catch (error) {
+        logger.warn?.("slack_context_unavailable", {
+          command: definition.command,
+          channelId: command.channel_id,
+          error: errorDetailsForLog(error)
+        });
+      }
+    }
+
     const runProvider = () =>
       semaphore.use(() =>
         router.run({
           definition,
           prompt: options.prompt,
           model: options.model,
+          recentMessages,
           context: {
             teamId: command.team_id,
             channelId: command.channel_id,
@@ -257,6 +246,7 @@ export async function handleSlashCommand({
       model: result.model,
       userId: command.user_id,
       channelId: command.channel_id,
+      contextMessages: recentMessages.length,
       responseChars: result.text.length,
       truncated: limited.truncated
     });

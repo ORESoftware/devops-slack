@@ -37,6 +37,10 @@ test("runtime config parses restrictions without mutating process.env", () => {
     SLACK_SOCKET_MODE: " false ",
     ALLOW_PUBLIC_RESPONSES: " no ",
     INCLUDE_SLACK_IDENTIFIERS_IN_PROMPT: " yes ",
+    SLACK_CONTEXT_MESSAGE_COUNT: "7",
+    SLACK_CONTEXT_CACHE_TTL_MS: "90000",
+    SLACK_CONTEXT_MAX_CHARS: "7000",
+    SLACK_CONTEXT_CACHE_MAX_ENTRIES: "700",
     PORT: "4444",
     MAX_QUEUED_REQUESTS: "7",
     MAX_CONCURRENT_REQUESTS_PER_USER: "2",
@@ -52,6 +56,10 @@ test("runtime config parses restrictions without mutating process.env", () => {
   assert.equal(config.socketMode, false);
   assert.equal(config.allowPublicResponses, false);
   assert.equal(config.includeSlackIdentifiersInPrompt, true);
+  assert.equal(config.slackContextMessageCount, 7);
+  assert.equal(config.slackContextCacheTtlMs, 90_000);
+  assert.equal(config.slackContextMaxChars, 7_000);
+  assert.equal(config.slackContextCacheMaxEntries, 700);
   assert.equal(config.port, 4444);
   assert.equal(config.maxQueuedRequests, 7);
   assert.equal(config.maxConcurrentRequestsPerUser, 2);
@@ -83,4 +91,33 @@ test("runtime config rejects unsafe queue, shutdown, and log settings", () => {
     /REQUEST_DEDUPE_MAX_ENTRIES/
   );
   assert.throws(() => enumEnv("LOG_LEVEL", "info", ["info", "warn"], { env: { LOG_LEVEL: "trace" } }), /must be one of/);
+  assert.throws(
+    () => loadRuntimeConfig({ SLACK_CONTEXT_MESSAGE_COUNT: "16" }),
+    /SLACK_CONTEXT_MESSAGE_COUNT/
+  );
+  assert.throws(
+    () => loadRuntimeConfig({ SLACK_CONTEXT_CACHE_TTL_MS: "999" }),
+    /SLACK_CONTEXT_CACHE_TTL_MS/
+  );
+  assert.throws(
+    () => loadRuntimeConfig({ SLACK_CONTEXT_MAX_CHARS: "255" }),
+    /SLACK_CONTEXT_MAX_CHARS/
+  );
+  assert.throws(
+    () => loadRuntimeConfig({ SLACK_CONTEXT_CACHE_MAX_ENTRIES: "0" }),
+    /SLACK_CONTEXT_CACHE_MAX_ENTRIES/
+  );
+});
+
+test("recent Slack context defaults to five messages and can be disabled", () => {
+  const defaults = loadRuntimeConfig({});
+  assert.equal(defaults.slackContextMessageCount, 5);
+  assert.equal(defaults.slackContextCacheTtlMs, 60_000);
+  assert.equal(defaults.slackContextMaxChars, 6_000);
+  assert.equal(defaults.slackContextCacheMaxEntries, 500);
+
+  assert.equal(
+    loadRuntimeConfig({ SLACK_CONTEXT_MESSAGE_COUNT: "0" }).slackContextMessageCount,
+    0
+  );
 });

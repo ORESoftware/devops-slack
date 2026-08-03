@@ -30,7 +30,14 @@ export function buildManifest(commands) {
     },
     oauth_config: {
       scopes: {
-        bot: ["commands", "chat:write"]
+        bot: [
+          "commands",
+          "chat:write",
+          "channels:history",
+          "groups:history",
+          "im:history",
+          "mpim:history"
+        ]
       }
     },
     settings: {

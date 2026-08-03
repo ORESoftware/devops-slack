@@ -56,7 +56,11 @@
     "scopes": {
       "bot": [
         "commands",
-        "chat:write"
+        "chat:write",
+        "channels:history",
+        "groups:history",
+        "im:history",
+        "mpim:history"
       ]
     }
   },

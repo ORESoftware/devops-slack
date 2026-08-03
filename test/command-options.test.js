@@ -29,10 +29,26 @@ test("supports escaped spaces and an end-of-options delimiter", () => {
   });
 });
 
+test("supports explicit ephemeral mode, help aliases, and equals-form model overrides", () => {
+  assert.deepEqual(parseCommandText("--public --ephemeral --model=gpt-5.6 hello"), {
+    prompt: "hello",
+    responseType: "ephemeral",
+    model: "gpt-5.6",
+    help: false
+  });
+  assert.deepEqual(parseCommandText("-h"), {
+    prompt: "",
+    responseType: "ephemeral",
+    model: undefined,
+    help: true
+  });
+});
+
 test("rejects unknown options and malformed quoting", () => {
   assert.throws(() => parseCommandText("--wat hello"), /Unknown option/);
   assert.throws(() => parseCommandText('"unterminated'), /Unterminated quoted string/);
   assert.throws(() => parseCommandText("trailing\\"), /Trailing escape character/);
   assert.throws(() => parseCommandText("--model <!channel> hello"), /--model must be/);
   assert.throws(() => parseCommandText(`--model ${"x".repeat(129)} hello`), /--model must be/);
+  assert.throws(() => parseCommandText("--model="), /--model requires a value/);
 });

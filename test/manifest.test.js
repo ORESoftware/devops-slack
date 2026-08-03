@@ -12,6 +12,13 @@ test("manifest contains every configured command exactly once", () => {
   const names = manifest.features.slash_commands.map((entry) => entry.command);
   assert.equal(new Set(names).size, commands.length);
   assert.deepEqual(names, commands.map((entry) => entry.command));
-  assert.ok(manifest.oauth_config.scopes.bot.includes("commands"));
+  assert.deepEqual(manifest.oauth_config.scopes.bot, [
+    "commands",
+    "chat:write",
+    "channels:history",
+    "groups:history",
+    "im:history",
+    "mpim:history"
+  ]);
   assert.equal(manifest.settings.socket_mode_enabled, true);
 });

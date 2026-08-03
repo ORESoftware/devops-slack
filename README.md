@@ -26,6 +26,12 @@ Example:
 /ores-chatgpt --public --model gpt-5.6 audit this deployment plan for failure modes
 ```
 
+By default, the app also supplies up to five recent human-authored messages from the current Slack
+conversation as background context. Authors, Slack IDs, bot messages, system events, and recognizable
+credential formats are removed before this context is sent to a provider. The current slash-command
+request is kept separate, and the history is explicitly marked as untrusted quoted data to reduce
+prompt-injection risk. Set `SLACK_CONTEXT_MESSAGE_COUNT=0` to disable this behavior.
+
 ## Local setup
 
 The app uses Slack Socket Mode, so local development does not require a public request URL.
@@ -57,12 +63,19 @@ Review the manifest diff before allowing the CLI to update the existing app conf
 
 ## App tokens and scopes
 
-The manifest requests only these bot scopes:
+The manifest requests these bot scopes:
 
 - `commands`
 - `chat:write`
+- `channels:history`
+- `groups:history`
+- `im:history`
+- `mpim:history`
 
 Socket Mode also requires an app-level token with `connections:write`. Do not commit any token.
+The history scopes are used only to load bounded context for conversations the bot can access. After
+adding these scopes to an existing installation, reinstall the app in the workspace so Slack grants
+the new permissions.
 
 ## Add another command
 
@@ -100,6 +113,9 @@ Then configure each slash command request URL in Slack. Socket Mode remains the 
 - Optional per-provider model allowlists prevent arbitrary model overrides.
 - Public channel responses can be disabled with `ALLOW_PUBLIC_RESPONSES=false`.
 - Slack team, channel, and user IDs are excluded from provider prompts by default; opt in only with `INCLUDE_SLACK_IDENTIFIERS_IN_PROMPT=true`.
+- Up to `SLACK_CONTEXT_MESSAGE_COUNT` recent human-authored messages are cached per channel for `SLACK_CONTEXT_CACHE_TTL_MS`, redacted, stripped of author identifiers, bounded by `SLACK_CONTEXT_MAX_CHARS`, and supplied as untrusted context. Set the count to `0` to disable external sharing of channel history.
+- Concurrent context lookups for the same channel are coalesced, and the context cache is LRU-bounded by `SLACK_CONTEXT_CACHE_MAX_ENTRIES`.
+- Missing history scopes, inaccessible conversations, and Slack history API failures degrade to a context-free provider request instead of failing the slash command.
 - API errors are sanitized before being shown to users, and structured logs redact known token formats and configured secrets.
 - Generated Slack user, group, channel, and broadcast mention markup is neutralized before posting.
 - Link and media unfurls are disabled on model-generated public channel messages so Slack does not crawl arbitrary generated URLs.

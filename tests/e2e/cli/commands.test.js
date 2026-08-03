@@ -15,6 +15,7 @@ const commands = [
   "/my-claude",
   "/my-chatgpt"
 ];
+const fakeGitHubToken = `gh${"p"}_${"a".repeat(36)}`;
 
 async function invoke(command, text, extraArgs = []) {
   const { stdout, stderr } = await execFileAsync(
@@ -66,6 +67,21 @@ test("CLI driver sanitizes provider failures", async () => {
   assert.doesNotMatch(result.finalResponse, /sk-test-never-expose/);
   assert.equal(result.logs.at(-1)?.event, "slash_command_failed");
   assert.doesNotMatch(JSON.stringify(result.logs), /sk-test-never-expose/);
+});
+
+test("CLI driver sends sanitized recent Slack messages as untrusted context", async () => {
+  const result = await invoke("/ores-chatgpt", "summarize the release decision", [
+    "--context-message",
+    "The release moved to Friday.",
+    "--context-message",
+    `Ask <@U123456789> and never expose ${fakeGitHubToken}`
+  ]);
+
+  assert.match(result.finalResponse, /recentSlackMessages/);
+  assert.match(result.finalResponse, /The release moved to Friday/);
+  assert.match(result.finalResponse, /summarize the release decision/);
+  assert.doesNotMatch(result.finalResponse, /U123456789|ghp_/);
+  assert.equal(result.logs.at(-1)?.payload.contextMessages, 2);
 });
 
 test("CLI driver rejects unknown commands and arguments", async () => {

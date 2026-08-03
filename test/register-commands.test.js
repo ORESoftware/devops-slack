@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { handleSlashCommand, registerCommands, safeErrorMessage } from "../src/register-commands.js";
 
+const fakeGitHubToken = `gh${"p"}_${"a".repeat(36)}`;
+
 const definition = {
   command: "/ores-chatgpt",
   provider: "openai",
@@ -45,6 +47,9 @@ function fixture(text) {
       logger: {
         info(event, payload) {
           logs.push({ level: "info", event, payload });
+        },
+        warn(event, payload) {
+          logs.push({ level: "warn", event, payload });
         },
         error(event, payload) {
           logs.push({ level: "error", event, payload });
@@ -159,7 +164,8 @@ test("structured error logs redact provider and environment credentials", async 
   process.env.OPENAI_API_KEY = "sk-environment-secret-value";
   data.dependencies.router.run = async () => {
     throw new Error(
-      "Bearer private-bearer-token and sk-inline-secret-value and xapp-inline-secret-value and sk-environment-secret-value"
+      "Bearer private-bearer-token and sk-inline-secret-value and xapp-inline-secret-value " +
+        `and ${fakeGitHubToken} and sk-environment-secret-value`
     );
   };
 
@@ -173,7 +179,7 @@ test("structured error logs redact provider and environment credentials", async 
   const serialized = JSON.stringify(data.logs.at(-1));
   assert.doesNotMatch(
     serialized,
-    /private-bearer-token|sk-inline-secret-value|xapp-inline-secret-value|sk-environment-secret-value/
+    /private-bearer-token|sk-inline-secret-value|xapp-inline-secret-value|ghp_|sk-environment-secret-value/
   );
   assert.match(serialized, /REDACTED/);
 });
@@ -326,4 +332,125 @@ test("registered listeners deduplicate Slack retries by trigger ID", async () =>
   finishProvider();
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(firstResponses.at(-1).text, /done/);
+});
+
+test("passes bounded recent channel context to the agent router", async () => {
+  const data = fixture("summarize this");
+  let routed;
+  data.dependencies.channelContext = {
+    enabled: true,
+    async get({ channelId }) {
+      assert.equal(channelId, "C1");
+      return ["first message", "second message"];
+    }
+  };
+  data.dependencies.router.run = async (payload) => {
+    routed = payload;
+    return { text: "done", model: "gpt-5.6", provider: "openai" };
+  };
+
+  await handleSlashCommand(data.dependencies);
+
+  assert.deepEqual(routed.recentMessages, ["first message", "second message"]);
+  assert.equal(routed.prompt, "summarize this");
+  assert.equal(data.logs.at(-1).payload.contextMessages, 2);
+});
+
+test("continues without channel context when Slack history lookup fails", async () => {
+  const data = fixture("summarize this");
+  let routed;
+  data.dependencies.channelContext = {
+    enabled: true,
+    async get() {
+      throw new Error(`history failed with ${fakeGitHubToken}`);
+    }
+  };
+  data.dependencies.router.run = async (payload) => {
+    routed = payload;
+    return { text: "done", model: "gpt-5.6", provider: "openai" };
+  };
+
+  await handleSlashCommand(data.dependencies);
+
+  assert.deepEqual(routed.recentMessages, []);
+  assert.match(data.responses.at(-1).text, /done/);
+  const warning = data.logs.find((entry) => entry.event === "slack_context_unavailable");
+  assert.equal(warning.level, "warn");
+  assert.doesNotMatch(JSON.stringify(warning), /ghp_/);
+});
+
+test("rejects disallowed users before parsing or invoking providers", async () => {
+  const data = fixture("--unknown should never parse");
+  data.dependencies.runtimeConfig.allowedUserIds = new Set(["U2"]);
+  let invoked = false;
+  data.dependencies.router.run = async () => {
+    invoked = true;
+    throw new Error("must not run");
+  };
+
+  await handleSlashCommand(data.dependencies);
+
+  assert.equal(invoked, false);
+  assert.equal(data.responses.length, 1);
+  assert.match(data.responses[0].text, /not allowed/);
+});
+
+test("returns contextual help for parse errors and explicit help", async () => {
+  const malformed = fixture("--model");
+  await handleSlashCommand(malformed.dependencies);
+  assert.match(malformed.responses[0].text, /--model requires a value/);
+  assert.match(malformed.responses[0].text, /Usage:/);
+
+  const help = fixture("--help ignored prompt");
+  await handleSlashCommand(help.dependencies);
+  assert.equal(help.responses.length, 1);
+  assert.match(help.responses[0].text, /Options:/);
+});
+
+test("rejects an oversized prompt without starting provider work", async () => {
+  const data = fixture("123456");
+  data.dependencies.runtimeConfig.maxPromptChars = 5;
+  let invoked = false;
+  data.dependencies.router.run = async () => {
+    invoked = true;
+    throw new Error("must not run");
+  };
+
+  await handleSlashCommand(data.dependencies);
+
+  assert.equal(invoked, false);
+  assert.match(data.responses[0].text, /Prompt is too long \(6 characters; max 5\)/);
+});
+
+test("falls back to the response URL when extra ephemeral chunks cannot use chat.postEphemeral", async () => {
+  const data = fixture("make a long response");
+  data.dependencies.router.run = async () => ({
+    text: "x".repeat(8_500),
+    model: "gpt-5.6",
+    provider: "openai"
+  });
+  data.dependencies.client.chat.postEphemeral = async () => {
+    throw new Error("ephemeral API unavailable");
+  };
+
+  await handleSlashCommand(data.dependencies);
+
+  assert.equal(data.responses[1].replace_original, true);
+  assert.ok(data.responses.length >= 4);
+  assert.ok(data.responses.slice(2).every((response) => response.response_type === "ephemeral"));
+});
+
+test("maps provider rate-limit and credential failures to safe user messages", () => {
+  assert.equal(
+    safeErrorMessage(new Error("429 Too Many Requests")),
+    "The provider rate limit was reached. Try again shortly."
+  );
+  assert.equal(
+    safeErrorMessage(new Error("401 invalid API key")),
+    "The provider rejected its API credentials."
+  );
+  assert.equal(
+    safeErrorMessage(new Error("OPENAI_API_KEY is not configured")),
+    "OPENAI_API_KEY is not configured"
+  );
 });

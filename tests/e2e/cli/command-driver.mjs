@@ -12,13 +12,23 @@ function requireValue(argv, index, flag) {
 }
 
 function parseArgs(argv) {
-  const options = { commandName: "", text: "", userId: "U_E2E", channelId: "C_E2E", runtimeConfig: {} };
+  const options = {
+    commandName: "",
+    text: "",
+    userId: "U_E2E",
+    channelId: "C_E2E",
+    channelMessages: [],
+    runtimeConfig: {}
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--command") options.commandName = requireValue(argv, index++, arg);
     else if (arg === "--text") options.text = requireValue(argv, index++, arg);
     else if (arg === "--user-id") options.userId = requireValue(argv, index++, arg);
     else if (arg === "--channel-id") options.channelId = requireValue(argv, index++, arg);
+    else if (arg === "--context-message") {
+      options.channelMessages.push(requireValue(argv, index++, arg));
+    }
     else if (arg === "--allowed-users") {
       options.runtimeConfig.allowedUserIds = parseCsv(requireValue(argv, index++, arg));
     } else if (arg === "--allowed-channels") {
@@ -49,7 +59,10 @@ function parseArgs(argv) {
 
 try {
   const options = parseArgs(process.argv.slice(2));
-  const harness = createCommandHarness({ runtimeConfig: options.runtimeConfig });
+  const harness = createCommandHarness({
+    runtimeConfig: options.runtimeConfig,
+    channelMessages: options.channelMessages
+  });
   const result = await harness.invoke({
     commandName: options.commandName,
     text: options.text,

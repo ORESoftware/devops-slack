@@ -3,6 +3,7 @@ import { commandDefinitions, profiles } from "../../../src/config.js";
 import { KeyedSemaphore } from "../../../src/keyed-semaphore.js";
 import { handleSlashCommand } from "../../../src/register-commands.js";
 import { Semaphore } from "../../../src/semaphore.js";
+import { SlackChannelContext } from "../../../src/slack/channel-context.js";
 
 const baseRuntimeConfig = Object.freeze({
   allowPublicResponses: true,
@@ -47,6 +48,7 @@ export function createCommandHarness(options = {}) {
   const {
     runtimeConfig,
     providers: providerOverrides,
+    channelMessages = [],
     concurrency = 2,
     perUserConcurrency = 1,
     perUserQueue = 2
@@ -60,6 +62,9 @@ export function createCommandHarness(options = {}) {
   const semaphore = new Semaphore(concurrency);
   const userSemaphore = new KeyedSemaphore(perUserConcurrency, { maxQueue: perUserQueue });
   const resolvedRuntimeConfig = mergeRuntimeConfig(runtimeConfig);
+  const channelContext = new SlackChannelContext({
+    messageCount: Math.min(15, channelMessages.length)
+  });
 
   return {
     commands: commandDefinitions.map((definition) => definition.command),
@@ -86,6 +91,13 @@ export function createCommandHarness(options = {}) {
           responses.push(structuredClone(payload));
         },
         client: {
+          conversations: {
+            history: async () => ({
+              messages: [...channelMessages]
+                .reverse()
+                .map((text, index) => ({ user: `U_CONTEXT_${index}`, text }))
+            })
+          },
           chat: {
             postMessage: async (payload) => {
               publicPosts.push(structuredClone(payload));
@@ -100,6 +112,9 @@ export function createCommandHarness(options = {}) {
         logger: {
           info(event, payload) {
             logs.push({ level: "info", event, payload: structuredClone(payload) });
+          },
+          warn(event, payload) {
+            logs.push({ level: "warn", event, payload: structuredClone(payload) });
           },
           error(event, payload) {
             logs.push({
@@ -116,6 +131,7 @@ export function createCommandHarness(options = {}) {
         router,
         semaphore,
         userSemaphore,
+        channelContext,
         runtimeConfig: resolvedRuntimeConfig,
         profiles
       });

@@ -7,6 +7,7 @@ import { KeyedSemaphore } from "./src/keyed-semaphore.js";
 import { registerCommands } from "./src/register-commands.js";
 import { RequestDeduplicator } from "./src/request-deduplicator.js";
 import { Semaphore } from "./src/semaphore.js";
+import { SlackChannelContext } from "./src/slack/channel-context.js";
 
 function requireEnv(name) {
   const value = process.env[name]?.trim();
@@ -56,6 +57,12 @@ const requestDeduplicator = new RequestDeduplicator({
   ttlMs: runtimeConfig.requestDedupeTtlMs,
   maxEntries: runtimeConfig.requestDedupeMaxEntries
 });
+const channelContext = new SlackChannelContext({
+  messageCount: runtimeConfig.slackContextMessageCount,
+  cacheTtlMs: runtimeConfig.slackContextCacheTtlMs,
+  maxChars: runtimeConfig.slackContextMaxChars,
+  maxEntries: runtimeConfig.slackContextCacheMaxEntries
+});
 
 const commandRuntime = registerCommands({
   app,
@@ -64,6 +71,7 @@ const commandRuntime = registerCommands({
   router,
   semaphore,
   userSemaphore,
+  channelContext,
   requestDeduplicator,
   runtimeConfig
 });
