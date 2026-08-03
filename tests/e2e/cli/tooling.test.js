@@ -23,7 +23,7 @@ test("Slack CLI hooks expose start and manifest commands", { skip: !existsSync(h
   assert.equal(stderr, "");
   const hooks = JSON.parse(stdout);
   assert.equal(typeof hooks.hooks?.start, "string");
-  assert.equal(typeof hooks.hooks?.get_manifest, "string");
+  assert.equal(typeof hooks.hooks?.["get-manifest"], "string");
 });
 
 test("GitHub Actions use immutable action SHAs and isolated browser jobs", async () => {
