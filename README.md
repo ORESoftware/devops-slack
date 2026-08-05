@@ -158,12 +158,17 @@ The local E2E harness does not call live AI providers or modify the Slack worksp
 
 ## GitHub Actions
 
-CI runs:
+CI runs for pull requests, pushes to the actual default branch (`master`), matching `v*` tags, and
+manual workflow dispatches. It includes:
 
 - unit, CLI E2E, manifest, syntax, and lint checks on Node.js 22 and 24;
 - independent Playwright, Puppeteer, and Selenium jobs against the Chrome and ChromeDriver preinstalled on GitHub-hosted runners;
 - a high-severity production dependency audit;
-- browser screenshots and traces as workflow artifacts.
+- browser screenshots and traces as workflow artifacts; and
+- commit-addressed source archives, standalone Slack manifests, build metadata, and SHA-256 checksums retained for 30 days.
+
+Generate the same source artifact set locally with `npm run artifacts:build`. See
+[source artifact publication](docs/artifact-publication.md) for contents and verification steps.
 
 Dependabot is configured for npm and GitHub Actions updates. Workflow policy tests reject mutable action tags.
 
