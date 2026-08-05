@@ -22,6 +22,7 @@
     "lint:fix": "biome lint --write .",
     "manifest:generate": "node scripts/generate-manifest.mjs",
     "manifest:check": "node scripts/generate-manifest.mjs --check",
+    "artifacts:build": "node scripts/build-source-artifacts.mjs",
     "validate": "npm run dependencies:check && npm run manifest:check && npm run check && npm run lint && npm test",
     "dependencies:check": "node scripts/check-dependency-pins.mjs"
   },
