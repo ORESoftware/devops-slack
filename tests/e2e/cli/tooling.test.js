@@ -8,23 +8,34 @@ import test from "node:test";
 
 const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../../..", import.meta.url));
-const hooksBinary = resolve(root, "node_modules", ".bin", process.platform === "win32" ? "slack-cli-get-hooks.cmd" : "slack-cli-get-hooks");
+const hooksBinary = resolve(
+  root,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "slack-cli-get-hooks.cmd" : "slack-cli-get-hooks"
+);
 
 test("manifest check succeeds from a clean CLI process", async () => {
-  const { stdout, stderr } = await execFileAsync(process.execPath, ["scripts/generate-manifest.mjs", "--check"], {
-    cwd: root
-  });
+  const { stdout, stderr } = await execFileAsync(
+    process.execPath,
+    ["scripts/generate-manifest.mjs", "--check"],
+    { cwd: root }
+  );
   assert.equal(stderr, "");
   assert.match(stdout, /manifest\.json is current/);
 });
 
-test("Slack CLI hooks expose start and manifest commands", { skip: !existsSync(hooksBinary) && process.env.REQUIRE_E2E_DEPENDENCIES !== "true" }, async () => {
-  const { stdout, stderr } = await execFileAsync(hooksBinary, [], { cwd: root });
-  assert.equal(stderr, "");
-  const hooks = JSON.parse(stdout);
-  assert.equal(typeof hooks.hooks?.start, "string");
-  assert.equal(typeof hooks.hooks?.["get-manifest"], "string");
-});
+test(
+  "Slack CLI hooks expose start and manifest commands",
+  { skip: !existsSync(hooksBinary) && process.env.REQUIRE_E2E_DEPENDENCIES !== "true" },
+  async () => {
+    const { stdout, stderr } = await execFileAsync(hooksBinary, [], { cwd: root });
+    assert.equal(stderr, "");
+    const hooks = JSON.parse(stdout);
+    assert.equal(typeof hooks.hooks?.start, "string");
+    assert.equal(typeof hooks.hooks?.["get-manifest"], "string");
+  }
+);
 
 test("GitHub Actions use immutable action SHAs and isolated browser jobs", async () => {
   const workflow = await import("node:fs/promises").then(({ readFile }) =>
@@ -47,6 +58,23 @@ test("GitHub Actions use immutable action SHAs and isolated browser jobs", async
   assert.match(workflow, /CHROMEWEBDRIVER/);
   assert.match(workflow, /npm_config_package_lock: "true"/);
   assert.match(workflow, /npm install --package-lock-only/);
+});
+
+test("GitHub Actions validate master and publish commit-addressed source artifacts", async () => {
+  const workflow = await import("node:fs/promises").then(({ readFile }) =>
+    readFile(resolve(root, ".github", "workflows", "ci.yml"), "utf8")
+  );
+
+  assert.match(workflow, /push:\n\s+branches: \[master\]/);
+  assert.match(workflow, /tags: \["v\*"\]/);
+  assert.doesNotMatch(workflow, /branches: \[main\]/);
+  assert.match(workflow, /source-artifacts:\n\s+name: source artifacts/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.match(workflow, /npm run artifacts:build/);
+  assert.match(workflow, /name: slack-ores-integrations-\$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /path: dist\//);
+  assert.match(workflow, /if-no-files-found: error/);
+  assert.match(workflow, /retention-days: 30/);
 });
 
 test("browser launch keeps the Chromium sandbox enabled by default", async () => {
