@@ -1,0 +1,44 @@
+[
+  {
+    "command": "/x-claude",
+    "provider": "anthropic",
+    "profile": "x",
+    "description": "Ask Claude using the X profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  },
+  {
+    "command": "/x-chatgpt",
+    "provider": "openai",
+    "profile": "x",
+    "description": "Ask ChatGPT using the X profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  },
+  {
+    "command": "/ores-claude",
+    "provider": "anthropic",
+    "profile": "ores",
+    "description": "Ask Claude using the ORES engineering profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  },
+  {
+    "command": "/ores-chatgpt",
+    "provider": "openai",
+    "profile": "ores",
+    "description": "Ask ChatGPT using the ORES engineering profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  },
+  {
+    "command": "/my-claude",
+    "provider": "anthropic",
+    "profile": "my",
+    "description": "Ask Claude using the personal profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  },
+  {
+    "command": "/my-chatgpt",
+    "provider": "openai",
+    "profile": "my",
+    "description": "Ask ChatGPT using the personal profile",
+    "usage_hint": "[--public] [--model MODEL] <prompt>"
+  }
+]

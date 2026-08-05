@@ -1,0 +1,14 @@
+{
+  "x": {
+    "label": "X",
+    "systemPromptFile": "agents/x.md"
+  },
+  "ores": {
+    "label": "ORES",
+    "systemPromptFile": "agents/ores.md"
+  },
+  "my": {
+    "label": "My",
+    "systemPromptFile": "agents/my.md"
+  }
+}

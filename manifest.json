@@ -1,0 +1,72 @@
+{
+  "_metadata": {
+    "major_version": 2,
+    "minor_version": 1
+  },
+  "display_information": {
+    "name": "alex-main-agent",
+    "description": "ORES Slack slash commands for Claude and ChatGPT",
+    "background_color": "#1F2937"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "alex-main-agent",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/x-claude",
+        "description": "Ask Claude using the X profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      },
+      {
+        "command": "/x-chatgpt",
+        "description": "Ask ChatGPT using the X profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      },
+      {
+        "command": "/ores-claude",
+        "description": "Ask Claude using the ORES engineering profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      },
+      {
+        "command": "/ores-chatgpt",
+        "description": "Ask ChatGPT using the ORES engineering profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      },
+      {
+        "command": "/my-claude",
+        "description": "Ask Claude using the personal profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      },
+      {
+        "command": "/my-chatgpt",
+        "description": "Ask ChatGPT using the personal profile",
+        "usage_hint": "[--public] [--model MODEL] <prompt>",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "commands",
+        "chat:write",
+        "channels:history",
+        "groups:history",
+        "im:history",
+        "mpim:history"
+      ]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

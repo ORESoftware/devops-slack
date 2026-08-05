@@ -1,0 +1,43 @@
+{
+  "name": "slack-ores-integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Config-driven Slack slash commands for ORES Claude and ChatGPT agents.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js",
+    "test": "npm run test:unit && npm run test:e2e:cli",
+    "test:unit": "node --test test/*.test.js",
+    "test:e2e": "npm run test:e2e:cli && npm run test:e2e:browser",
+    "test:e2e:cli": "node --test --test-concurrency=1 tests/e2e/cli/*.test.js",
+    "test:e2e:browser": "node --test --test-concurrency=1 tests/e2e/browser/*.test.js",
+    "test:all": "npm run dependencies:check && npm run manifest:check && npm run check && npm run lint && npm run test:unit && npm run test:e2e",
+    "check": "node scripts/check-js-syntax.mjs",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "manifest:generate": "node scripts/generate-manifest.mjs",
+    "manifest:check": "node scripts/generate-manifest.mjs --check",
+    "validate": "npm run dependencies:check && npm run manifest:check && npm run check && npm run lint && npm test",
+    "dependencies:check": "node scripts/check-dependency-pins.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.115.0",
+    "@slack/bolt": "5.0.0",
+    "dotenv": "17.4.2",
+    "openai": "7.3.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@slack/cli-hooks": "2.0.0",
+    "@types/node": "22.20.1",
+    "typescript": "7.0.2",
+    "playwright": "1.62.0",
+    "puppeteer-core": "25.3.0",
+    "selenium-webdriver": "4.46.0"
+  }
+}

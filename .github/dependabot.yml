@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      browser-testing:
+        patterns:
+          - playwright
+          - puppeteer-core
+          - selenium-webdriver
+      slack-and-ai-sdks:
+        patterns:
+          - "@slack/*"
+          - openai
+          - "@anthropic-ai/*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
