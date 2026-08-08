@@ -1,0 +1,132 @@
+name: SOPS dummy consumer pilot
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sops-dummy-pilot-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  npm_config_audit: "false"
+  npm_config_fund: "false"
+  npm_config_ignore_scripts: "true"
+  npm_config_package_lock: "false"
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out consumer repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out audited ores-sops implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ORESoftware/ores-sops
+          ref: 0c5502671f7b72e123e62468e57b5b06d4a4293b
+          path: .ci/ores-sops
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        with:
+          flakehub: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install application dependencies without lifecycle scripts
+        run: npm install --no-package-lock
+
+      - name: Generate test-only ciphertext and activate dev through root symlink
+        shell: bash
+        env:
+          SOPS_AGE_KEY_FILE: ${{ runner.temp }}/ores-sops-pilot-age.txt
+        run: |
+          set -euo pipefail
+          nix develop ./.ci/ores-sops -c bash -c '
+            set -euo pipefail
+            age-keygen -o "$SOPS_AGE_KEY_FILE" >/dev/null 2>&1
+            ores-sops init
+
+            printf "%s\n" \
+              "SOPS_PILOT_MARKER=dummy-dev-only" \
+              "SOPS_PILOT_ENV=dev" > env/dec/dev.env
+            ores-sops encrypt dev >/dev/null
+
+            printf "%s\n" \
+              "SOPS_PILOT_MARKER=dummy-prod-only" \
+              "SOPS_PILOT_ENV=prod" > env/dec/prod.env
+            ores-sops encrypt prod >/dev/null
+
+            ores-sops lock >/dev/null
+            ores-sops use dev >/dev/null
+            ores-sops verify
+
+            test -L .env
+            test "$(readlink .env)" = "env/dec/dev.env"
+            test "$(stat -c %a env/dec)" = "700"
+            test "$(stat -c %a env/dec/dev.env)" = "600"
+            test -f env/enc/dev.env.enc
+            test -f env/enc/prod.env.enc
+            git check-ignore --no-index -q .env
+            git check-ignore --no-index -q env/dec/dev.env
+            ! git check-ignore --no-index -q env/enc/dev.env.enc
+            ! git check-ignore --no-index -q env/enc/prod.env.enc
+          '
+
+      - name: Prove the application's real dotenv loader follows the managed symlink
+        run: |
+          node --input-type=module -e '
+            import "dotenv/config";
+            if (process.env.SOPS_PILOT_MARKER !== "dummy-dev-only") {
+              throw new Error("dotenv/config did not load the managed root .env symlink");
+            }
+            if (process.env.SOPS_PILOT_ENV !== "dev") {
+              throw new Error("unexpected pilot environment");
+            }
+          '
+
+      - name: Run existing unit and CLI end-to-end tests with managed dummy env active
+        run: |
+          npm run test:unit
+          npm run test:e2e:cli
+
+      - name: Prove source artifacts cannot ingest decrypted env state
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run artifacts:build
+          archive="$(find dist -maxdepth 1 -type f -name '*.tar.gz' -print -quit)"
+          test -n "$archive"
+          if tar -tzf "$archive" | grep -E '(^|/)\.env$|(^|/)env/dec/'; then
+            echo 'decrypted dotenv state entered the source archive' >&2
+            exit 1
+          fi
+
+      - name: Clean managed plaintext even after failures
+        if: ${{ always() }}
+        shell: bash
+        env:
+          SOPS_AGE_KEY_FILE: ${{ runner.temp }}/ores-sops-pilot-age.txt
+        run: |
+          set -euo pipefail
+          if [[ -d .ci/ores-sops ]]; then
+            nix develop ./.ci/ores-sops -c ores-sops lock || true
+          fi
+          rm -f -- "$SOPS_AGE_KEY_FILE"
+          test ! -e .env || { echo 'managed .env survived cleanup' >&2; exit 1; }
+          test ! -e env/dec/dev.env || { echo 'decrypted dev env survived cleanup' >&2; exit 1; }
+          test ! -e env/dec/prod.env || { echo 'decrypted prod env survived cleanup' >&2; exit 1; }

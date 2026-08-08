@@ -1,7 +1,23 @@
 node_modules/
-.env
+
+# BEGIN ores-sops dotenv policy
+# Plaintext dotenv is local-only at every depth, including common suffix variants.
+*.env
+*/*.env
+*/**/*.env
 .env.*
+*.env.*
 !.env.example
+
+# Decrypted material is never tracked.
+/env/dec/
+
+# Only the two approved application ciphertext paths are trackable.
+/env/enc/*
+!/env/enc/dev.env.enc
+!/env/enc/prod.env.enc
+# END ores-sops dotenv policy
+
 coverage/
 dist/
 *.log
