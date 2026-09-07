@@ -27,13 +27,13 @@
     "dependencies:check": "node scripts/check-dependency-pins.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.122.0",
-    "@slack/bolt": "5.0.0",
+    "@anthropic-ai/sdk": "0.123.0",
+    "@slack/bolt": "5.1.0",
     "dotenv": "17.4.2",
-    "openai": "7.8.0"
+    "openai": "7.10.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
+    "@biomejs/biome": "2.5.12",
     "@slack/cli-hooks": "2.0.0",
     "@types/node": "26.4.1",
     "typescript": "7.0.2",
